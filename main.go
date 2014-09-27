@@ -10,7 +10,10 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 var db *sql.DB
@@ -73,7 +76,7 @@ func main() {
 	store := sessions.NewCookieStore([]byte("secret-isucon"))
 	m.Use(sessions.Sessions("isucon_go_session", store))
 
-	m.Use(martini.Static("../public"))
+	//m.Use(martini.Static("../public"))
 	m.Use(render.Renderer(render.Options{
 		Layout: "layout",
 	}))
@@ -140,7 +143,49 @@ func main() {
 		r.Status(200)
 	})
 
+	initStaticFiles("../public")
+	http.Handle("/", m)
+
 	log.Println("Starting...")
-	log.Fatal(http.ListenAndServe(":80", m))
+	log.Fatal(http.ListenAndServe(":80", nil))
 	//log.Fatal(http.ListenAndServe(":8080", m))
+}
+
+func initStaticFiles(prefix string) {
+	wf := func(path string, info os.FileInfo, err error) error {
+		log.Println(path, info, err)
+		if path == prefix {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		urlpath := path[len(prefix):]
+		if urlpath[0] != '/' {
+			urlpath = "/" + urlpath
+		}
+		log.Println("Registering", urlpath, path)
+		f, err := os.Open(path)
+		if err != nil {
+			log.Println(err)
+			return nil
+		}
+		content := make([]byte, info.Size())
+		f.Read(content)
+		f.Close()
+
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(path, ".css") {
+				w.Header().Set("Content-Type", "text/css")
+			} else if strings.HasSuffix(path, ".js") {
+				w.Header().Set("Content-Type", "application/javascript")
+			}
+			w.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+			w.Write(content)
+		}
+		http.HandleFunc(urlpath, handler)
+		//r.HandleFunc(urlpath, handler)
+		return nil
+	}
+	filepath.Walk(prefix, wf)
 }

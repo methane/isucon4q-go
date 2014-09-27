@@ -123,5 +123,6 @@ func main() {
 		r.Status(200)
 	})
 
+	log.Println("Starting...")
 	log.Fatal(http.ListenAndServe(":8080", m))
 }

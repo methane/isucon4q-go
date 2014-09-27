@@ -71,8 +71,12 @@ func initLogins() {
 	must(err)
 	defer rows.Close()
 	for rows.Next() {
+		var id sql.NullInt64
 		login := &UserLogin{}
-		err := rows.Scan(&login.Id, &login.Ip, &login.Login, &login.Success, &login.CreatedAt)
+		err := rows.Scan(&id, &login.Ip, &login.Login, &login.Success, &login.CreatedAt)
+		if id.Valid {
+			login.Id = int(id.Int64)
+		}
 		//log.Printf("%+v", login)
 		must(err)
 		loginHistory.Add(login)
@@ -89,11 +93,10 @@ func initDb() {
 			"VALUES (?,?,?,?,?)")
 	must(err)
 
-	insertCh = make(chan *UserLogin, 5)
-	go inserter()
-	go inserter()
-	go inserter()
-	go inserter()
+	insertCh = make(chan *UserLogin, 100)
+	for i := 0; i < 20; i++ {
+		go inserter()
+	}
 }
 
 func inserter() {

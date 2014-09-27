@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"github.com/go-martini/martini"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 )
 
 var db *sql.DB
@@ -39,6 +41,8 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	db.SetMaxIdleConns(32)
+	db.SetMaxOpenConns(32)
 	initDb()
 
 	UserLockThreshold, err = strconv.Atoi(getEnv("ISU4_USER_LOCK_THRESHOLD", "3"))
@@ -71,18 +75,34 @@ func Classic() *ClassicMartini {
 	return &ClassicMartini{m, r}
 }
 
+func index(w http.ResponseWriter, session sessions.Session) {
+	buf := bytes.Buffer{}
+	buf.WriteString(index_header)
+	flush := getFlash(session, "notice")
+	if len(flush) > 0 {
+		buf.WriteString(`<div id="notice-message" class="alert alert-danger" role="alert">`)
+		template.HTMLEscape(&buf, []byte(flush))
+		buf.WriteString("</div>\n")
+	}
+	buf.WriteString(index_footer)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.Write(buf.Bytes())
+}
+
 func main() {
 	m := Classic()
 
 	store := sessions.NewCookieStore([]byte("secret-isucon"))
 	m.Use(sessions.Sessions("isucon_go_session", store))
 
-	//m.Use(martini.Static("../public"))
 	m.Use(render.Renderer())
 
-	m.Get("/", func(r render.Render, session sessions.Session) {
-		r.HTML(200, "index", map[string]string{"Flash": getFlash(session, "notice")})
-	})
+	m.Get("/", index)
+	//m.Get("/", func(r render.Render, session sessions.Session) {
+	//	r.HTML(200, "index", map[string]string{"Flash": getFlash(session, "notice")})
+	//})
 
 	m.Post("/login", func(req *http.Request, r render.Render, session sessions.Session) {
 		user, err := attemptLogin(req)
@@ -187,3 +207,61 @@ func initStaticFiles(prefix string) {
 	}
 	filepath.Walk(prefix, wf)
 }
+
+const index_header = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/stylesheets/bootstrap.min.css">
+    <link rel="stylesheet" href="/stylesheets/bootflat.min.css">
+    <link rel="stylesheet" href="/stylesheets/isucon-bank.css">
+    <title>isucon4</title>
+  </head>
+  <body>
+    <div class="container">
+      <h1 id="topbar">
+        <a href="/"><img src="/images/isucon-bank.png" alt="いすこん銀行 オンラインバンキングサービス"></a>
+      </h1>
+<div id="be-careful-phising" class="panel panel-danger">
+  <div class="panel-heading">
+    <span class="hikaru-mozi">偽画面にご注意ください！</span>
+  </div>
+  <div class="panel-body">
+    <p>偽のログイン画面を表示しお客様の情報を盗み取ろうとする犯罪が多発しています。</p>
+    <p>ログイン直後にダウンロード中や、見知らぬウィンドウが開いた場合、<br>すでにウィルスに感染している場合がございます。即座に取引を中止してください。</p>
+    <p>また、残高照会のみなど、必要のない場面で乱数表の入力を求められても、<br>絶対に入力しないでください。</p>
+  </div>
+</div>
+
+<div class="page-header">
+  <h1>ログイン</h1>
+</div>
+`
+
+const index_footer = `
+<div class="container">
+  <form class="form-horizontal" role="form" action="/login" method="POST">
+    <div class="form-group">
+      <label for="input-username" class="col-sm-3 control-label">お客様ご契約ID</label>
+      <div class="col-sm-9">
+        <input id="input-username" type="text" class="form-control" placeholder="半角英数字" name="login">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="input-password" class="col-sm-3 control-label">パスワード</label>
+      <div class="col-sm-9">
+        <input type="password" class="form-control" id="input-password" name="password" placeholder="半角英数字・記号（２文字以上）">
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="col-sm-offset-3 col-sm-9">
+        <button type="submit" class="btn btn-primary btn-lg btn-block">ログイン</button>
+      </div>
+    </div>
+  </form>
+</div>
+    </div>
+
+  </body>
+</html>
+`

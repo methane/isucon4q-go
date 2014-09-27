@@ -3,11 +3,9 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
-	"github.com/go-martini/martini"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/martini-contrib/render"
-	"github.com/martini-contrib/sessions"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -16,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 )
 
 var db *sql.DB
@@ -59,111 +58,169 @@ func init() {
 	initLogins()
 }
 
-// ClassicMartini represents a Martini with some reasonable defaults. Embeds the router functions for convenience.
-type ClassicMartini struct {
-	*martini.Martini
-	martini.Router
-}
-
-// Classic creates a classic Martini with some basic default middleware - martini.Logger, martini.Recovery and martini.Static.
-// Classic also maps martini.Routes as a service.
-func Classic() *ClassicMartini {
-	r := martini.NewRouter()
-	m := martini.New()
-	m.MapTo(r, (*martini.Routes)(nil))
-	m.Action(r.Handle)
-	return &ClassicMartini{m, r}
-}
-
-func index(w http.ResponseWriter, session sessions.Session) {
+func index(w http.ResponseWriter, req *http.Request) {
+	sess := sessionStore.Get(req)
 	buf := bytes.Buffer{}
 	buf.WriteString(index_header)
-	flush := getFlash(session, "notice")
-	if len(flush) > 0 {
+	if sess.Notice != "" {
 		buf.WriteString(`<div id="notice-message" class="alert alert-danger" role="alert">`)
-		template.HTMLEscape(&buf, []byte(flush))
+		template.HTMLEscape(&buf, []byte(sess.Notice))
 		buf.WriteString("</div>\n")
+		sess.Notice = ""
+		sessionStore.Set(w, sess)
 	}
 	buf.WriteString(index_footer)
-
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 	w.Write(buf.Bytes())
 }
 
+func login_post(w http.ResponseWriter, req *http.Request) {
+	sess := sessionStore.Get(req)
+	user, err := attemptLogin(req)
+
+	if err != nil || user == nil {
+		notice := ""
+		switch err {
+		case ErrBannedIP:
+			notice = "You're banned."
+		case ErrLockedUser:
+			notice = "This account is locked."
+		default:
+			notice = "Wrong username or password"
+		}
+		sess.Notice = notice
+		sessionStore.Set(w, sess)
+		http.Redirect(w, req, "/", 302)
+		return
+	}
+	sess.UserId = user.ID
+	sessionStore.Set(w, sess)
+	http.Redirect(w, req, "/mypage", 302)
+}
+
+func mypage(w http.ResponseWriter, req *http.Request) {
+	sess := sessionStore.Get(req)
+	var currentUser *User = nil
+	if sess.UserId != 0 {
+		currentUser = userRepository.ById(sess.UserId)
+	}
+	if currentUser == nil {
+		sess.Notice = "You must be logged in"
+		sessionStore.Set(w, sess)
+		http.Redirect(w, req, "/", 302)
+		return
+	}
+	currentUser.getLastLogin()
+	loginAt := currentUser.LastLogin.CreatedAt.Format("2006-01-02 15:04:05")
+	loginIp := currentUser.LastLogin.IP
+	loginName := template.HTMLEscapeString(currentUser.LastLogin.Login)
+
+	buf := bytes.Buffer{}
+	buf.WriteString(mypage_header)
+	fmt.Fprintf(&buf, `
+  <dd id="last-logined-at">%s</dd>
+  <dt>最終ログインIPアドレス</dt>
+  <dd id="last-logined-ip">%s</dd>
+</dl>
+
+<div class="panel panel-default">
+  <div class="panel-heading">
+    お客様ご契約ID：%s 様の代表口座
+`, loginAt, loginIp, loginName)
+	buf.WriteString(mypage_footer)
+
+	w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.Write(buf.Bytes())
+
+}
+
 func main() {
-	m := Classic()
+	//m := Classic()
 
-	store := sessions.NewCookieStore([]byte("secret-isucon"))
-	m.Use(sessions.Sessions("isucon_go_session", store))
+	//store := sessions.NewCookieStore([]byte("secret-isucon"))
+	//m.Use(sessions.Sessions("isucon_go_session", store))
+	//m.Use(render.Renderer())
 
-	m.Use(render.Renderer())
+	http.HandleFunc("/", index)
+	http.HandleFunc("/login", login_post)
+	//	m.Post("/login", func(req *http.Request, r render.Render, session sessions.Session) {
+	//		user, err := attemptLogin(req)
+	//
+	//		notice := ""
+	//		if err != nil || user == nil {
+	//			switch err {
+	//			case ErrBannedIP:
+	//				notice = "You're banned."
+	//			case ErrLockedUser:
+	//				notice = "This account is locked."
+	//			default:
+	//				notice = "Wrong username or password"
+	//			}
+	//
+	//			session.Set("notice", notice)
+	//			r.Redirect("/")
+	//			return
+	//		}
+	//
+	//		session.Set("user_id", strconv.Itoa(user.ID))
+	//		r.Redirect("/mypage")
+	//	})
 
-	m.Get("/", index)
-	//m.Get("/", func(r render.Render, session sessions.Session) {
-	//	r.HTML(200, "index", map[string]string{"Flash": getFlash(session, "notice")})
+	http.HandleFunc("/mypage", mypage)
+	//m.Get("/mypage", func(r render.Render, session sessions.Session) {
+	//	var currentUser *User = nil
+	//	sId := session.Get("user_id")
+	//	userIdStr, ok := sId.(string)
+	//	if ok {
+	//		userId, err := strconv.Atoi(userIdStr)
+	//		if err == nil {
+	//			currentUser = userRepository.ById(userId)
+	//		} else {
+	//			log.Println(err)
+	//		}
+	//	} else {
+	//		log.Printf("user_id = %#v (%T)", sId, sId)
+	//	}
+	//	if currentUser == nil {
+	//		session.Set("notice", "You must be logged in")
+	//		r.Redirect("/")
+	//		return
+	//	}
+	//	currentUser.getLastLogin()
+	//	r.HTML(200, "mypage", currentUser)
 	//})
 
-	m.Post("/login", func(req *http.Request, r render.Render, session sessions.Session) {
-		user, err := attemptLogin(req)
-
-		notice := ""
-		if err != nil || user == nil {
-			switch err {
-			case ErrBannedIP:
-				notice = "You're banned."
-			case ErrLockedUser:
-				notice = "This account is locked."
-			default:
-				notice = "Wrong username or password"
-			}
-
-			session.Set("notice", notice)
-			r.Redirect("/")
-			return
-		}
-
-		session.Set("user_id", strconv.Itoa(user.ID))
-		r.Redirect("/mypage")
-	})
-
-	m.Get("/mypage", func(r render.Render, session sessions.Session) {
-		var currentUser *User = nil
-		sId := session.Get("user_id")
-		userIdStr, ok := sId.(string)
-		if ok {
-			userId, err := strconv.Atoi(userIdStr)
-			if err == nil {
-				currentUser = userRepository.ById(userId)
-			} else {
-				log.Println(err)
-			}
-		} else {
-			log.Printf("user_id = %#v (%T)", sId, sId)
-		}
-		if currentUser == nil {
-			session.Set("notice", "You must be logged in")
-			r.Redirect("/")
-			return
-		}
-		currentUser.getLastLogin()
-		r.HTML(200, "mypage", currentUser)
-	})
-
-	m.Get("/report", func(r render.Render) {
-		r.JSON(200, map[string][]string{
+	//m.Get("/report", func(r render.Render) {
+	//	r.JSON(200, map[string][]string{
+	//		"banned_ips":   bannedIPs(),
+	//		"locked_users": lockedUsers(),
+	//	})
+	//})
+	http.HandleFunc("/report", func(w http.ResponseWriter, r *http.Request) {
+		data, err := json.Marshal(map[string][]string{
 			"banned_ips":   bannedIPs(),
 			"locked_users": lockedUsers(),
 		})
+		if err != nil {
+			log.Println(err)
+			w.WriteHeader(500)
+			w.Write([]byte("error"))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
 	})
 
-	m.Get("/__reset__", func(r render.Render) {
+	http.HandleFunc("/__reset__", func(w http.ResponseWriter, r *http.Request) {
 		initLogins()
-		r.Status(200)
+		log.Println("reset")
+		time.Sleep(time.Second)
+		w.Write([]byte("OK"))
 	})
-
 	initStaticFiles("../public")
-	http.Handle("/", m)
 
 	log.Println("Starting...")
 	log.Fatal(http.ListenAndServe(":80", nil))
@@ -259,6 +316,62 @@ const index_footer = `
       </div>
     </div>
   </form>
+</div>
+    </div>
+
+  </body>
+</html>
+`
+
+const mypage_header = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="/stylesheets/bootstrap.min.css">
+    <link rel="stylesheet" href="/stylesheets/bootflat.min.css">
+    <link rel="stylesheet" href="/stylesheets/isucon-bank.css">
+    <title>isucon4</title>
+  </head>
+  <body>
+    <div class="container">
+      <h1 id="topbar">
+        <a href="/"><img src="/images/isucon-bank.png" alt="いすこん銀行 オンラインバンキングサービス"></a>
+      </h1>
+<div class="alert alert-success" role="alert">
+  ログインに成功しました。<br>
+  未読のお知らせが０件、残っています。
+</div>
+
+<dl class="dl-horizontal">
+  <dt>前回ログイン</dt>
+`
+
+const mypage_footer = `
+  </div>
+  <div class="panel-body">
+    <div class="row">
+      <div class="col-sm-4">
+        普通預金<br>
+        <small>東京支店　1111111111</small><br>
+      </div>
+      <div class="col-sm-4">
+        <p id="zandaka" class="text-right">
+          ―――円
+        </p>
+      </div>
+
+      <div class="col-sm-4">
+        <p>
+          <a class="btn btn-success btn-block">入出金明細を表示</a>
+          <a class="btn btn-default btn-block">振込・振替はこちらから</a>
+        </p>
+      </div>
+
+      <div class="col-sm-12">
+        <a class="btn btn-link btn-block">定期預金・住宅ローンのお申込みはこちら</a>
+      </div>
+    </div>
+  </div>
 </div>
     </div>
 

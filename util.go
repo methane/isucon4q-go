@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"fmt"
-	"github.com/martini-contrib/sessions"
 	"io"
 	"log"
 	"os"
@@ -14,19 +13,7 @@ func getEnv(key string, def string) string {
 	if len(v) == 0 {
 		return def
 	}
-
 	return v
-}
-
-func getFlash(session sessions.Session, key string) string {
-	value := session.Get(key)
-
-	if value == nil {
-		return ""
-	} else {
-		session.Delete(key)
-		return value.(string)
-	}
 }
 
 func calcPassHash(password, hash string) string {
@@ -34,7 +21,6 @@ func calcPassHash(password, hash string) string {
 	io.WriteString(h, password)
 	io.WriteString(h, ":")
 	io.WriteString(h, hash)
-
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 

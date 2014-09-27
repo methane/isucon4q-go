@@ -46,7 +46,6 @@ func init() {
 		panic(err)
 	}
 
-	// TODO: /__reset__ を叩かれたら init し直す
 	initUsers()
 	initLogins()
 }
@@ -90,14 +89,24 @@ func main() {
 	})
 
 	m.Get("/mypage", func(r render.Render, session sessions.Session) {
-		currentUser := getCurrentUser(session.Get("user_id"))
-
+		var currentUser *User = nil
+		sId := session.Get("user_id")
+		userIdStr, ok := sId.(string)
+		if ok {
+			userId, err := strconv.Atoi(userIdStr)
+			if err == nil {
+				currentUser = userRepository.ById(userId)
+			} else {
+				log.Println(err)
+			}
+		} else {
+			log.Printf("user_id = %#v (%T)", sId, sId)
+		}
 		if currentUser == nil {
 			session.Set("notice", "You must be logged in")
 			r.Redirect("/")
 			return
 		}
-
 		currentUser.getLastLogin()
 		r.HTML(200, "mypage", currentUser)
 	})
@@ -107,6 +116,11 @@ func main() {
 			"banned_ips":   bannedIPs(),
 			"locked_users": lockedUsers(),
 		})
+	})
+
+	m.Get("/__reset__", func(r render.Render) {
+		initLogins()
+		r.Status(200)
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", m))

@@ -19,12 +19,29 @@ type User struct {
 }
 
 type UserRepository struct {
-	userById map[int]*User
+	userById   map[int]*User
+	userByName map[string]*User
 }
 
 var userRepository *UserRepository
 
+func NewUserRepository() *UserRepository {
+	return &UserRepository{
+		userById:   make(map[int]*User),
+		userByName: make(map[string]*User),
+	}
+}
+
 func (r *UserRepository) Add(user *User) {
+	r.userById[user.ID] = user
+	r.userByName[user.Login] = user
+}
+
+func (r *UserRepository) ByName(name string) *User {
+	return r.userByName[name]
+}
+func (r *UserRepository) ById(id int) *User {
+	return r.userById[id]
 }
 
 type LastLogin struct {
@@ -34,30 +51,35 @@ type LastLogin struct {
 }
 
 func (u *User) getLastLogin() *LastLogin {
-	rows, err := db.Query(
-		"SELECT login, ip, created_at FROM login_log WHERE succeeded = 1 AND user_id = ? ORDER BY id DESC LIMIT 2",
-		u.ID,
-	)
-
-	if err != nil {
+	hist := loginHistory.ByName(u.Login)
+	u.LastLogin = &LastLogin{}
+	if hist == nil || len(hist) < 2 {
 		return nil
 	}
 
-	defer rows.Close()
-	for rows.Next() {
-		u.LastLogin = &LastLogin{}
-		err = rows.Scan(&u.LastLogin.Login, &u.LastLogin.IP, &u.LastLogin.CreatedAt)
-		if err != nil {
-			u.LastLogin = nil
-			return nil
+	var l *UserLogin = nil
+	current := false
+	for i := len(hist) - 1; i >= 0; i-- {
+		if !hist[i].Success {
+			continue
 		}
+		if current {
+			l = hist[i]
+			break
+		}
+		current = true
 	}
-
+	if l == nil {
+		return nil
+	}
+	u.LastLogin.Login = l.Login
+	u.LastLogin.CreatedAt = l.CreatedAt
+	u.LastLogin.IP = l.Ip
 	return u.LastLogin
 }
 
 func initUsers() {
-	userRepository = &UserRepository{userById: make(map[int]*User)}
+	userRepository = NewUserRepository()
 
 	file, err := os.Open("dummy_users.tsv")
 	if err != nil {
@@ -79,7 +101,7 @@ func initUsers() {
 		}
 		name := rec[1]
 		pass := rec[2]
-		log.Printf("id: %v, name: %v, pass: %v", id, name, pass)
+		//log.Printf("id: %v, name: %v, pass: %v", id, name, pass)
 		userRepository.Add(&User{ID: id, Login: name, password: pass})
 	}
 }

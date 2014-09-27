@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -23,16 +24,55 @@ type UserLogin struct {
 	CreatedAt time.Time
 }
 
+type LoginHistory struct {
+	sync.RWMutex
+	byName map[string][]*UserLogin
+	byAddr map[string][]*UserLogin
+}
+
+func NewLoginHistory() *LoginHistory {
+	return &LoginHistory{
+		byName: make(map[string][]*UserLogin),
+		byAddr: make(map[string][]*UserLogin),
+	}
+}
+
+func (h *LoginHistory) ByName(name string) []*UserLogin {
+	h.RLock()
+	r := h.byName[name]
+	h.RUnlock()
+	return r
+}
+
+func (h *LoginHistory) ByAddr(addr string) []*UserLogin {
+	h.RLock()
+	r := h.byAddr[addr]
+	h.RUnlock()
+	return r
+}
+
+func (h *LoginHistory) Add(login *UserLogin) {
+	h.Lock()
+	h.byName[login.Login] = append(h.byName[login.Login], login)
+	h.byAddr[login.Ip] = append(h.byName[login.Ip], login)
+	h.Unlock()
+}
+
+var loginHistory *LoginHistory
+
 func initLogins() {
+	loginHistory = NewLoginHistory()
+
 	rows, err := db.Query("SELECT `user_id`, `ip`, `login`, `succeeded`, `created_at` FROM login_log")
 	must(err)
+	defer rows.Close()
 	for rows.Next() {
 		login := &UserLogin{}
 		err := rows.Scan(&login.Id, &login.Ip, &login.Login, &login.Success, &login.CreatedAt)
+		//log.Printf("%+v", login)
 		must(err)
-		log.Printf("%+v", login)
+		loginHistory.Add(login)
 	}
-	rows.Close()
 }
 
 func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error {
@@ -47,12 +87,18 @@ func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error 
 		userId.Valid = true
 	}
 
-	_, err := db.Exec(
+	now := time.Now()
+	res, err := db.Exec(
 		"INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) "+
 			"VALUES (?,?,?,?,?)",
-		time.Now(), userId, login, remoteAddr, succ,
+		now, userId, login, remoteAddr, succ,
 	)
-
+	id, err := res.LastInsertId()
+	if err != nil {
+		log.Println(err)
+	} else {
+		loginHistory.Add(&UserLogin{Id: int(id), Ip: remoteAddr, Login: login, Success: succeeded, CreatedAt: now})
+	}
 	return err
 }
 
@@ -102,7 +148,6 @@ func isBannedIP(ip string) (bool, error) {
 
 func attemptLogin(req *http.Request) (*User, error) {
 	succeeded := false
-	user := &User{}
 
 	loginName := req.PostFormValue("login")
 	password := req.PostFormValue("password")
@@ -112,56 +157,26 @@ func attemptLogin(req *http.Request) (*User, error) {
 		remoteAddr = xForwardedFor
 	}
 
+	user := userRepository.ByName(loginName)
 	defer func() {
 		createLoginLog(succeeded, remoteAddr, loginName, user)
 	}()
 
-	row := db.QueryRow(
-		"SELECT id, login, password_hash, salt FROM users WHERE login = ?",
-		loginName,
-	)
-	err := row.Scan(&user.ID, &user.Login, &user.PasswordHash, &user.Salt)
-
-	switch {
-	case err == sql.ErrNoRows:
-		user = nil
-	case err != nil:
-		return nil, err
-	}
-
 	if banned, _ := isBannedIP(remoteAddr); banned {
 		return nil, ErrBannedIP
 	}
-
 	if locked, _ := isLockedUser(user); locked {
 		return nil, ErrLockedUser
 	}
-
 	if user == nil {
 		return nil, ErrUserNotFound
 	}
 
-	if user.PasswordHash != calcPassHash(password, user.Salt) {
+	if user.password != password {
 		return nil, ErrWrongPassword
 	}
-
 	succeeded = true
 	return user, nil
-}
-
-func getCurrentUser(userId interface{}) *User {
-	user := &User{}
-	row := db.QueryRow(
-		"SELECT id, login, password_hash, salt FROM users WHERE id = ?",
-		userId,
-	)
-	err := row.Scan(&user.ID, &user.Login, &user.PasswordHash, &user.Salt)
-
-	if err != nil {
-		return nil
-	}
-
-	return user
 }
 
 func bannedIPs() []string {

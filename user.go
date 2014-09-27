@@ -1,6 +1,10 @@
 package main
 
 import (
+	"encoding/csv"
+	"log"
+	"os"
+	"strconv"
 	"time"
 )
 
@@ -9,8 +13,18 @@ type User struct {
 	Login        string
 	PasswordHash string
 	Salt         string
+	password     string
 
 	LastLogin *LastLogin
+}
+
+type UserRepository struct {
+	userById map[int]*User
+}
+
+var userRepository *UserRepository
+
+func (r *UserRepository) Add(user *User) {
 }
 
 type LastLogin struct {
@@ -40,4 +54,32 @@ func (u *User) getLastLogin() *LastLogin {
 	}
 
 	return u.LastLogin
+}
+
+func initUsers() {
+	userRepository = &UserRepository{userById: make(map[int]*User)}
+
+	file, err := os.Open("dummy_users.tsv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	reader := csv.NewReader(file)
+	reader.Comma = '\t'
+	reader.FieldsPerRecord = 5
+	reader.TrimLeadingSpace = true
+	records, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, rec := range records {
+		id, err := strconv.Atoi(rec[0])
+		if err != nil {
+			log.Println(rec)
+			log.Fatal(err)
+		}
+		name := rec[1]
+		pass := rec[2]
+		log.Printf("id: %v, name: %v, pass: %v", id, name, pass)
+		userRepository.Add(&User{ID: id, Login: name, password: pass})
+	}
 }

@@ -7,7 +7,9 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/martini-contrib/render"
 	"github.com/martini-contrib/sessions"
+	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"strconv"
 )
 
@@ -43,6 +45,8 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+
+	initUsers()
 }
 
 func main() {
@@ -103,5 +107,5 @@ func main() {
 		})
 	})
 
-	http.ListenAndServe(":8080", m)
+	log.Fatal(http.ListenAndServe(":8080", m))
 }

@@ -14,6 +14,14 @@ var (
 	ErrWrongPassword = errors.New("Wrong password")
 )
 
+type UserLogin struct {
+	Id        int
+	Ip        string
+	Login     string
+	Success   bool
+	CreatedAt time.Time
+}
+
 func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error {
 	succ := 0
 	if succeeded {

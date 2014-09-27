@@ -7,12 +7,14 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 )
@@ -22,6 +24,8 @@ var (
 	UserLockThreshold int
 	IPBanThreshold    int
 )
+
+var bufferPool = sync.Pool{New: func() interface{} { return &bytes.Buffer{} }}
 
 func init() {
 	dsn := fmt.Sprintf(
@@ -60,11 +64,11 @@ func init() {
 
 func index(w http.ResponseWriter, req *http.Request) {
 	sess := sessionStore.Get(req)
-	buf := bytes.Buffer{}
+	buf := bufferPool.Get().(*bytes.Buffer)
 	buf.WriteString(index_header)
 	if sess.Notice != "" {
 		buf.WriteString(`<div id="notice-message" class="alert alert-danger" role="alert">`)
-		template.HTMLEscape(&buf, []byte(sess.Notice))
+		template.HTMLEscape(buf, []byte(sess.Notice))
 		buf.WriteString("</div>\n")
 		sess.Notice = ""
 		sessionStore.Set(w, sess)
@@ -73,6 +77,8 @@ func index(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 	w.Write(buf.Bytes())
+	buf.Reset()
+	bufferPool.Put(buf)
 }
 
 func login_post(w http.ResponseWriter, req *http.Request) {
@@ -116,9 +122,9 @@ func mypage(w http.ResponseWriter, req *http.Request) {
 	loginIp := currentUser.LastLogin.IP
 	loginName := template.HTMLEscapeString(currentUser.LastLogin.Login)
 
-	buf := bytes.Buffer{}
+	buf := bufferPool.Get().(*bytes.Buffer)
 	buf.WriteString(mypage_header)
-	fmt.Fprintf(&buf, `
+	fmt.Fprintf(buf, `
   <dd id="last-logined-at">%s</dd>
   <dt>最終ログインIPアドレス</dt>
   <dd id="last-logined-ip">%s</dd>
@@ -133,7 +139,8 @@ func mypage(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 	w.Write(buf.Bytes())
-
+	buf.Reset()
+	bufferPool.Put(buf)
 }
 
 func main() {
@@ -223,6 +230,10 @@ func main() {
 	initStaticFiles("../public")
 
 	log.Println("Starting...")
+
+	//l, err := net.Listen("unix", "/tmp/isucon.sock")
+	//must(err)
+	//log.Fatal(http.Serve(l, nil))
 	log.Fatal(http.ListenAndServe(":80", nil))
 	//log.Fatal(http.ListenAndServe(":8080", m))
 }
@@ -249,14 +260,22 @@ func initStaticFiles(prefix string) {
 		content := make([]byte, info.Size())
 		f.Read(content)
 		f.Close()
+		contentLength := strconv.Itoa(len(content))
+		contentType := ""
+		switch {
+		case strings.HasSuffix(path, ".css"):
+			contentType = "text/css"
+		case strings.HasSuffix(path, ".js"):
+			contentType = "application/javascript"
+		case strings.HasSuffix(path, ".png"):
+			contentType = "image/png"
+		}
 
 		handler := func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasSuffix(path, ".css") {
-				w.Header().Set("Content-Type", "text/css")
-			} else if strings.HasSuffix(path, ".js") {
-				w.Header().Set("Content-Type", "application/javascript")
+			if contentType != "" {
+				w.Header().Set("Content-Type", contentType)
 			}
-			w.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+			w.Header().Set("Content-Length", contentLength)
 			w.Write(content)
 		}
 		http.HandleFunc(urlpath, handler)

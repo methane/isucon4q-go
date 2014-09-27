@@ -21,11 +21,12 @@ var (
 
 func init() {
 	dsn := fmt.Sprintf(
-		"%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=Local",
+		//"%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=Local",
+		"%s:%s@unix(/var/lib/mysql/mysql.sock)/%s?parseTime=true&loc=Local",
 		getEnv("ISU4_DB_USER", "root"),
 		getEnv("ISU4_DB_PASSWORD", ""),
-		getEnv("ISU4_DB_HOST", "localhost"),
-		getEnv("ISU4_DB_PORT", "3306"),
+		//getEnv("ISU4_DB_HOST", "localhost"),
+		//getEnv("ISU4_DB_PORT", "3306"),
 		getEnv("ISU4_DB_NAME", "isu4_qualifier"),
 	)
 
@@ -50,8 +51,24 @@ func init() {
 	initLogins()
 }
 
+// ClassicMartini represents a Martini with some reasonable defaults. Embeds the router functions for convenience.
+type ClassicMartini struct {
+	*martini.Martini
+	martini.Router
+}
+
+// Classic creates a classic Martini with some basic default middleware - martini.Logger, martini.Recovery and martini.Static.
+// Classic also maps martini.Routes as a service.
+func Classic() *ClassicMartini {
+	r := martini.NewRouter()
+	m := martini.New()
+	m.MapTo(r, (*martini.Routes)(nil))
+	m.Action(r.Handle)
+	return &ClassicMartini{m, r}
+}
+
 func main() {
-	m := martini.Classic()
+	m := Classic()
 
 	store := sessions.NewCookieStore([]byte("secret-isucon"))
 	m.Use(sessions.Sessions("isucon_go_session", store))
@@ -124,5 +141,6 @@ func main() {
 	})
 
 	log.Println("Starting...")
-	log.Fatal(http.ListenAndServe(":8080", m))
+	log.Fatal(http.ListenAndServe(":80", m))
+	//log.Fatal(http.ListenAndServe(":8080", m))
 }

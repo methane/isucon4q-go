@@ -92,8 +92,6 @@ func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error 
 	}
 
 	now := time.Now()
-	loginHistory.Lock()
-	defer loginHistory.Unlock()
 	res, err := db.Exec(
 		"INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) "+
 			"VALUES (?,?,?,?,?)",
@@ -103,7 +101,7 @@ func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error 
 	if err != nil {
 		log.Println(err)
 	} else {
-		loginHistory.add(&UserLogin{Id: int(id), Ip: remoteAddr, Login: login, Success: succeeded, CreatedAt: now})
+		loginHistory.Add(&UserLogin{Id: int(id), Ip: remoteAddr, Login: login, Success: succeeded, CreatedAt: now})
 	}
 	return err
 }

@@ -39,6 +39,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+	initDb()
 
 	UserLockThreshold, err = strconv.Atoi(getEnv("ISU4_USER_LOCK_THRESHOLD", "3"))
 	if err != nil {

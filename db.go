@@ -79,31 +79,39 @@ func initLogins() {
 	}
 }
 
+var insertStmt *sql.Stmt
+var insertCh chan *UserLogin
+
+func initDb() {
+	var err error
+	insertStmt, err = db.Prepare(
+		"INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) " +
+			"VALUES (?,?,?,?,?)")
+	must(err)
+
+	insertCh = make(chan *UserLogin, 5)
+	go inserter()
+	go inserter()
+	go inserter()
+	go inserter()
+}
+
+func inserter() {
+	for {
+		l := <-insertCh
+		_, err := insertStmt.Exec(l.CreatedAt, l.Id, l.Login, l.Ip, l.Success)
+		if err != nil {
+			log.Println(err)
+		}
+	}
+}
+
 func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error {
-	succ := 0
-	if succeeded {
-		succ = 1
-	}
-
-	var userId sql.NullInt64
-	if user != nil {
-		userId.Int64 = int64(user.ID)
-		userId.Valid = true
-	}
-
 	now := time.Now()
-	res, err := db.Exec(
-		"INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) "+
-			"VALUES (?,?,?,?,?)",
-		now, userId, login, remoteAddr, succ,
-	)
-	id, err := res.LastInsertId()
-	if err != nil {
-		log.Println(err)
-	} else {
-		loginHistory.Add(&UserLogin{Id: int(id), Ip: remoteAddr, Login: login, Success: succeeded, CreatedAt: now})
-	}
-	return err
+	ul := &UserLogin{Id: user.ID, Ip: remoteAddr, Login: login, Success: succeeded, CreatedAt: now}
+	loginHistory.Add(ul)
+	insertCh <- ul
+	return nil
 }
 
 func isLockedUser(user *User) (bool, error) {

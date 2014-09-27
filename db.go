@@ -53,9 +53,13 @@ func (h *LoginHistory) ByAddr(addr string) []*UserLogin {
 
 func (h *LoginHistory) Add(login *UserLogin) {
 	h.Lock()
+	h.add(login)
+	h.Unlock()
+}
+
+func (h *LoginHistory) add(login *UserLogin) {
 	h.byName[login.Login] = append(h.byName[login.Login], login)
 	h.byAddr[login.Ip] = append(h.byName[login.Ip], login)
-	h.Unlock()
 }
 
 var loginHistory *LoginHistory
@@ -88,6 +92,8 @@ func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error 
 	}
 
 	now := time.Now()
+	loginHistory.Lock()
+	defer loginHistory.Unlock()
 	res, err := db.Exec(
 		"INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) "+
 			"VALUES (?,?,?,?,?)",
@@ -97,7 +103,7 @@ func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error 
 	if err != nil {
 		log.Println(err)
 	} else {
-		loginHistory.Add(&UserLogin{Id: int(id), Ip: remoteAddr, Login: login, Success: succeeded, CreatedAt: now})
+		loginHistory.add(&UserLogin{Id: int(id), Ip: remoteAddr, Login: login, Success: succeeded, CreatedAt: now})
 	}
 	return err
 }
@@ -106,31 +112,11 @@ func isLockedUser(user *User) (bool, error) {
 	if user == nil {
 		return false, nil
 	}
-
-	var ni sql.NullInt64
-	row := db.QueryRow(
-		"SELECT COUNT(1) AS failures FROM login_log WHERE "+
-			"user_id = ? AND id > IFNULL((select id from login_log where user_id = ? AND "+
-			"succeeded = 1 ORDER BY id DESC LIMIT 1), 0);",
-		user.ID, user.ID,
-	)
-	err := row.Scan(&ni)
-
-	switch {
-	case err == sql.ErrNoRows:
-		return false, nil
-	case err != nil:
-		return false, err
-	}
-
-	return UserLockThreshold <= int(ni.Int64), nil
-}
-
-func isBannedIP(ip string) (bool, error) {
-	hi := loginHistory.ByAddr(ip)
-	if hi == nil || len(hi) < IPBanThreshold {
+	hi := loginHistory.ByName(user.Login)
+	if hi == nil || len(hi) < UserLockThreshold {
 		return false, nil
 	}
+
 	c := 0
 	for i := len(hi) - 1; i >= 0; i-- {
 		h := hi[i]
@@ -138,25 +124,63 @@ func isBannedIP(ip string) (bool, error) {
 			return false, nil
 		}
 		c++
-		if c >= IPBanThreshold {
+		if c >= UserLockThreshold {
 			return true, nil
 		}
 	}
+	return false, nil
+
 	//var ni sql.NullInt64
 	//row := db.QueryRow(
 	//	"SELECT COUNT(1) AS failures FROM login_log WHERE "+
-	//		"ip = ? AND id > IFNULL((select id from login_log where ip = ? AND "+
+	//		"user_id = ? AND id > IFNULL((select id from login_log where user_id = ? AND "+
 	//		"succeeded = 1 ORDER BY id DESC LIMIT 1), 0);",
-	//	ip, ip,
+	//	user.ID, user.ID,
 	//)
 	//err := row.Scan(&ni)
+
 	//switch {
 	//case err == sql.ErrNoRows:
 	//	return false, nil
 	//case err != nil:
 	//	return false, err
 	//}
-	//return IPBanThreshold <= int(ni.Int64), nil
+
+	//return UserLockThreshold <= int(ni.Int64), nil
+}
+
+func isBannedIP(ip string) (bool, error) {
+	//hi := loginHistory.ByAddr(ip)
+	//if hi == nil || len(hi) < IPBanThreshold {
+	//	return false, nil
+	//}
+	//c := 0
+	//for i := len(hi) - 1; i >= 0; i-- {
+	//	h := hi[i]
+	//	if h.Success {
+	//		return false, nil
+	//	}
+	//	c++
+	//	if c >= IPBanThreshold {
+	//		return true, nil
+	//	}
+	//}
+	//return false, nil
+	var ni sql.NullInt64
+	row := db.QueryRow(
+		"SELECT COUNT(1) AS failures FROM login_log WHERE "+
+			"ip = ? AND id > IFNULL((select id from login_log where ip = ? AND "+
+			"succeeded = 1 ORDER BY id DESC LIMIT 1), 0);",
+		ip, ip,
+	)
+	err := row.Scan(&ni)
+	switch {
+	case err == sql.ErrNoRows:
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return IPBanThreshold <= int(ni.Int64), nil
 }
 
 func attemptLogin(req *http.Request) (*User, error) {

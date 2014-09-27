@@ -46,7 +46,9 @@ func init() {
 		panic(err)
 	}
 
+	// TODO: /__reset__ を叩かれたら init し直す
 	initUsers()
+	initLogins()
 }
 
 func main() {

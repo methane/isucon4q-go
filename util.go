@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/martini-contrib/sessions"
 	"io"
+	"log"
 	"os"
 )
 
@@ -35,4 +36,10 @@ func calcPassHash(password, hash string) string {
 	io.WriteString(h, hash)
 
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func must(err error) {
+	if err != nil {
+		log.Panic(err)
+	}
 }

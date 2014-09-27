@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"time"
 )
@@ -20,6 +21,18 @@ type UserLogin struct {
 	Login     string
 	Success   bool
 	CreatedAt time.Time
+}
+
+func initLogins() {
+	rows, err := db.Query("SELECT `user_id`, `ip`, `login`, `succeeded`, `created_at` FROM login_log")
+	must(err)
+	for rows.Next() {
+		login := &UserLogin{}
+		err := rows.Scan(&login.Id, &login.Ip, &login.Login, &login.Success, &login.CreatedAt)
+		must(err)
+		log.Printf("%+v", login)
+	}
+	rows.Close()
 }
 
 func createLoginLog(succeeded bool, remoteAddr, login string, user *User) error {

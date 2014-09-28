@@ -7,7 +7,7 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"log"
-	"net"
+	_ "net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"

@@ -227,7 +227,7 @@ func main() {
 		time.Sleep(time.Second)
 		w.Write([]byte("OK"))
 	})
-	initStaticFiles("../public")
+	initStaticFiles("./public")
 
 	log.Println("Starting...")
 

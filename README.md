@@ -12,7 +12,7 @@ go get github.com/gorilla/securecookie
 Build:
 
 ```
-go build -o app
+make
 ```
 
 Run:
